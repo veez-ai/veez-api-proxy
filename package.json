@@ -1,0 +1,24 @@
+{
+  "name": "veez-api-proxy",
+  "version": "1.0.0",
+  "description": "Serveur proxy pour contourner les restrictions CORS de l'API Veez.ai",
+  "main": "serveur-proxy-veez.js",
+  "scripts": {
+    "start": "node serveur-proxy-veez.js",
+    "dev": "nodemon serveur-proxy-veez.js",
+    "test": "node -e \"console.log('Serveur proxy Veez.ai prêt!')\""
+  },
+  "keywords": ["veez", "proxy", "cors", "api"],
+  "author": "Assistant Claude",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
