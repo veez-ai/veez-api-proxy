@@ -1,223 +1,175 @@
+// serveur-proxy-veez.js
 const express = require('express');
-const { createProxyMiddleware } = require('http-proxy-middleware');
 const cors = require('cors');
+const https = require('https');
+const http = require('http');
+const path = require('path');
 
 const app = express();
+const PORT = 3001;
 
-// Configuration CORS permissive pour le développement
+// Configuration CORS pour permettre les requêtes depuis votre page web
 app.use(cors({
-    origin: '*',
+    origin: ['http://localhost:3000', 'http://127.0.0.1:3000', 'file://', '*'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-    credentials: false
+    credentials: true
 }));
 
-// Logs pour debug
-app.use((req, res, next) => {
-    console.log(`🚀 Proxying ${req.method} ${req.path} -> https://app.veez.ai${req.path}`);
-    console.log(`   Content-Type: ${req.headers['content-type'] || 'non défini'}`);
-    if (req.headers.authorization) {
-        console.log(`   Authorization: ${req.headers.authorization.substring(0, 30)}...`);
-    }
-    next();
-});
+// Middleware pour parser le JSON
+app.use(express.json());
 
-// Configuration du proxy pour toutes les routes API
-const proxyOptions = {
-    target: 'https://app.veez.ai',
-    changeOrigin: true,
-    secure: true,
-    timeout: 60000,
-    proxyTimeout: 60000,
-    followRedirects: true,
-    onProxyReq: (proxyReq, req) => {
-        console.log(`📤 Proxying to: https://app.veez.ai${req.url}`);
-        
-        // 🔧 CORRECTION: Nettoyer les headers d'autorisation
-        if (req.headers.authorization) {
-            let authHeader = req.headers.authorization;
-            
-            // Si le header contient déjà "Bearer Bearer", le corriger
-            if (authHeader.startsWith('Bearer Bearer ')) {
-                authHeader = authHeader.replace('Bearer Bearer ', 'Bearer ');
-                console.log(`🔧 Correction auth header: "Bearer Bearer ..." -> "Bearer ..."`);
-            }
-            // Si le header ne commence pas par "Bearer", l'ajouter
-            else if (!authHeader.startsWith('Bearer ')) {
-                authHeader = 'Bearer ' + authHeader;
-                console.log(`🔧 Ajout "Bearer" au token`);
-            }
-            
-            proxyReq.setHeader('Authorization', authHeader);
-            console.log(`🔑 Auth final: ${authHeader.substring(0, 30)}...`);
-        }
-        
-        // Pour les requêtes POST avec FormData, ne pas modifier le Content-Type
-        if (req.headers['content-type']) {
-            proxyReq.setHeader('Content-Type', req.headers['content-type']);
-        }
-        
-        // Nettoyer les headers problématiques
-        proxyReq.removeHeader('host');
-        proxyReq.removeHeader('origin');
-    },
-    onProxyRes: (proxyRes, req, res) => {
-        console.log(`✅ Response ${proxyRes.statusCode} for ${req.method} ${req.path}`);
-        console.log(`   Response Content-Type: ${proxyRes.headers['content-type']}`);
-        
-        // Ajouter les headers CORS à la réponse
-        res.header('Access-Control-Allow-Origin', '*');
-        res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-    },
-    onError: (err, req, res) => {
-        console.error('❌ Proxy Error:', err.message);
-        console.error('   Request:', req.method, req.path);
-        console.error('   Headers:', req.headers);
-        
-        if (!res.headersSent) {
-            res.status(500).json({
-                error: 'Erreur du serveur proxy',
-                message: err.message,
-                request: {
-                    method: req.method,
-                    path: req.path
-                }
-            });
-        }
-    }
-};
-
-// Proxy middleware pour toutes les routes /api/*
-app.use('/api', createProxyMiddleware(proxyOptions));
-
-// Route de test pour vérifier les endpoints
-app.get('/test', (req, res) => {
-    res.json({
-        status: 'OK',
-        message: 'Serveur proxy Veez.ai fonctionnel',
-        timestamp: new Date().toISOString(),
-        endpoints: {
-            products: '/api/product/',
-            templates: '/api/template/',
-            predictions: '/api/prediction/ (POST avec FormData supporté)'
-        },
-        cors: 'Activé pour toutes les origines',
-        formdata_support: 'Activé pour /api/prediction/',
-        auth_fix: 'Correction du double "Bearer" implémentée'
-    });
-});
-
-// Route de test spécifique pour l'endpoint prediction
-app.get('/test-prediction', (req, res) => {
-    res.json({
-        endpoint: '/api/prediction/',
-        method: 'POST',
-        content_type: 'multipart/form-data',
-        required_fields: {
-            product_id: 'string (required)',
-            prompt: 'string (required)', 
-            aspect_ratio: 'string (required) - ex: 1:1, 16:9, etc.'
-        },
-        headers: {
-            Authorization: 'Bearer YOUR_API_TOKEN (pas "Bearer Bearer")'
-        },
-        auth_fix: 'Le serveur corrige automatiquement "Bearer Bearer" -> "Bearer"',
-        curl_example: `curl -X POST ${req.get('host').includes('localhost') ? 'http' : 'https'}://${req.get('host')}/api/prediction/ \\
-  -H "Authorization: Bearer YOUR_TOKEN" \\
-  -F "product_id=YOUR_PRODUCT_ID" \\
-  -F "prompt=Une canette dans un bar" \\
-  -F "aspect_ratio=1:1"`
-    });
-});
-
-// Route pour afficher des informations sur le serveur
-app.get('/', (req, res) => {
-    const baseUrl = req.get('host').includes('localhost') 
-        ? `http://${req.get('host')}`
-        : `https://${req.get('host')}`;
+// Fonction proxy manuelle pour remplacer http-proxy-middleware
+function proxyRequest(req, res, targetUrl) {
+    const url = new URL(targetUrl + req.url.replace('/api', '/api'));
     
+    console.log(`🚀 Proxying ${req.method} ${req.url} -> ${url.href}`);
+    
+    // Log des headers pour debug (masquer le token)
+    const authHeader = req.headers.authorization;
+    if (authHeader) {
+        console.log(`   Authorization: ${authHeader.substring(0, 20)}...`);
+    }
+
+    const options = {
+        hostname: url.hostname,
+        port: url.port || 443,
+        path: url.pathname + url.search,
+        method: req.method,
+        headers: {
+            ...req.headers,
+            host: url.hostname,
+            origin: url.origin
+        }
+    };
+
+    // Supprimer les headers qui peuvent causer des problèmes
+    delete options.headers['host'];
+    delete options.headers['connection'];
+
+    const protocol = url.protocol === 'https:' ? https : http;
+    
+    const proxyReq = protocol.request(options, (proxyRes) => {
+        console.log(`✅ Response ${proxyRes.statusCode} for ${req.url}`);
+        
+        // Transférer les headers de réponse
+        Object.keys(proxyRes.headers).forEach(key => {
+            res.setHeader(key, proxyRes.headers[key]);
+        });
+        
+        // Assurer que CORS est bien configuré
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+        
+        res.statusCode = proxyRes.statusCode;
+        proxyRes.pipe(res);
+    });
+
+    proxyReq.on('error', (err) => {
+        console.error('❌ Proxy Error:', err.message);
+        res.status(500).json({ 
+            error: 'Erreur du proxy', 
+            details: err.message,
+            url: url.href
+        });
+    });
+
+    // Transférer le body pour les requêtes POST/PUT
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+        if (req.body) {
+            proxyReq.write(JSON.stringify(req.body));
+        }
+    }
+
+    proxyReq.end();
+}
+
+// Route proxy pour tous les endpoints API
+app.all('/api/*', (req, res) => {
+    proxyRequest(req, res, 'https://app.veez.ai');
+});
+
+// Route de test
+app.get('/test', (req, res) => {
+    res.json({ 
+        message: 'Serveur proxy Veez.ai opérationnel!', 
+        timestamp: new Date().toISOString(),
+        endpoints: [
+            'GET /api/product/ - Liste des produits',
+            'GET /api/template/ - Liste des templates',
+            'POST /api/product/ - Créer un produit',
+            'POST /api/prediction/ - Créer une prédiction'
+        ]
+    });
+});
+
+// Route d'information
+app.get('/', (req, res) => {
     res.send(`
         <html>
         <head>
-            <title>🚀 Serveur Proxy Veez.ai</title>
+            <title>Serveur Proxy Veez.ai</title>
             <style>
                 body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
-                h1 { color: #2563eb; }
-                .endpoint { background: #f3f4f6; padding: 10px; margin: 5px 0; border-radius: 5px; }
-                .status { color: #059669; }
-                .fix { color: #dc2626; background: #fef2f2; padding: 10px; border-radius: 5px; margin: 10px 0; }
-                pre { background: #374151; color: #f9fafb; padding: 15px; border-radius: 5px; overflow-x: auto; }
+                .endpoint { background: #f5f5f5; padding: 10px; margin: 10px 0; border-radius: 5px; }
+                .success { color: #27ae60; }
+                .info { color: #3498db; }
+                pre { background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 5px; overflow-x: auto; }
             </style>
         </head>
         <body>
-            <h1>🚀 Serveur Proxy Veez.ai</h1>
-            <p class="status">✅ Le serveur proxy est opérationnel avec correction auth</p>
-            
-            <div class="fix">
-                <strong>🔧 Correction de l'authentification :</strong><br>
-                Le serveur détecte et corrige automatiquement le problème "Bearer Bearer" dans les headers d'autorisation.<br>
-                ✅ "Bearer Bearer 1e303a..." → "Bearer 1e303a..."<br>
-                ✅ Headers nettoyés pour compatibilité Veez.ai
-            </div>
+            <h1 class="success">🚀 Serveur Proxy Veez.ai</h1>
+            <p class="info">Le serveur proxy est opérationnel sur le port ${PORT}</p>
             
             <h2>Endpoints disponibles :</h2>
-            <div class="endpoint"><strong>GET</strong> ${baseUrl}/api/product/ - Lister les produits</div>
-            <div class="endpoint"><strong>GET</strong> ${baseUrl}/api/product/{id} - Détails d'un produit</div>
-            <div class="endpoint"><strong>POST</strong> ${baseUrl}/api/prediction/ - <strong>Génération IA ✨</strong></div>
-            <div class="endpoint"><strong>GET</strong> ${baseUrl}/api/prediction/ - Lister les prédictions</div>
-            <div class="endpoint"><strong>GET</strong> ${baseUrl}/api/prediction/{id} - Détails d'une prédiction</div>
+            <div class="endpoint"><strong>GET</strong> http://localhost:${PORT}/api/product/</div>
+            <div class="endpoint"><strong>GET</strong> http://localhost:${PORT}/api/template/</div>
+            <div class="endpoint"><strong>POST</strong> http://localhost:${PORT}/api/product/</div>
+            <div class="endpoint"><strong>POST</strong> http://localhost:${PORT}/api/prediction/</div>
             
-            <h2>Tests :</h2>
-            <div class="endpoint"><strong>GET</strong> <a href="${baseUrl}/test">${baseUrl}/test</a> - Test général</div>
-            <div class="endpoint"><strong>GET</strong> <a href="${baseUrl}/test-prediction">${baseUrl}/test-prediction</a> - Test endpoint prediction</div>
+            <h2>Test :</h2>
+            <div class="endpoint"><strong>GET</strong> <a href="/test">http://localhost:${PORT}/test</a></div>
             
-            <h2>Exemple de test avec curl :</h2>
-            <pre>curl -X POST ${baseUrl}/api/prediction/ \\
-  -H "Authorization: Bearer YOUR_TOKEN" \\
-  -F "product_id=213104dcf..." \\
-  -F "prompt=Une canette dans un bar" \\
-  -F "aspect_ratio=1:1"</pre>
+            <h2>Exemple d'utilisation :</h2>
+            <pre>curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:${PORT}/api/product/</pre>
             
-            <h2>Pour votre dashboard :</h2>
+            <h2>Instructions :</h2>
             <ol>
-                <li>✅ Cochez "Utiliser le serveur proxy Render"</li>
-                <li>✅ Testez maintenant la connexion - l'erreur 400 devrait être résolue !</li>
-                <li>🎯 L'endpoint /api/prediction/ devrait maintenant fonctionner !</li>
+                <li>Modifiez votre page web pour utiliser <code>http://localhost:${PORT}/api/</code> au lieu de <code>https://app.veez.ai/api/</code></li>
+                <li>Gardez ce serveur en marche pendant que vous utilisez votre landing page</li>
+                <li>Vos requêtes passeront maintenant par ce proxy sans problème CORS</li>
             </ol>
             
             <h2>Status :</h2>
-            <div class="status">✅ Express server running</div>
-            <div class="status">✅ CORS enabled for all origins</div>
-            <div class="status">✅ FormData support enabled</div>
-            <div class="status">✅ Authorization header fixed</div>
-            <div class="status">✅ All API routes proxied</div>
+            <p>✅ Express server running<br>
+            ✅ CORS enabled<br>
+            ✅ Proxy routes configured</p>
         </body>
         </html>
     `);
 });
 
 // Démarrage du serveur
-const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-    const baseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
-    
-    console.log('🚀 Serveur Proxy Veez.ai démarré !');
-    console.log(`📍 URL: ${baseUrl}`);
-    console.log(`🔗 API Proxy: ${baseUrl}/api/`);
-    console.log(`🎨 Génération IA: ${baseUrl}/api/prediction/`);
-    console.log(`📝 Test: ${baseUrl}/test`);
-    console.log('');
-    console.log('🔧 CORRECTIF IMPORTANT :');
-    console.log('   ✅ Correction du double "Bearer" dans Authorization');
-    console.log('   ✅ Headers nettoyés pour compatibilité API Veez.ai');
-    console.log('   ✅ Support FormData complet pour /api/prediction/');
-    console.log('');
-    console.log('📋 Test de l\'endpoint de génération IA :');
-    console.log(`   curl -X POST ${baseUrl}/api/prediction/ \\`);
-    console.log('     -H "Authorization: Bearer YOUR_TOKEN" \\');
-    console.log('     -F "product_id=YOUR_PRODUCT_ID" \\');
-    console.log('     -F "prompt=Une canette dans un bar" \\');
-    console.log('     -F "aspect_ratio=1:1"');
-    console.log('');
+    console.log(`
+🚀 Serveur Proxy Veez.ai démarré !
+📍 URL: http://localhost:${PORT}
+🔗 API Proxy: http://localhost:${PORT}/api/
+📝 Test: http://localhost:${PORT}/test
+
+💡 Pour utiliser avec votre landing page, changez l'URL de l'API de :
+   https://app.veez.ai/api/product/
+   vers :
+   http://localhost:${PORT}/api/product/
+
+📋 Test rapide :
+   curl http://localhost:${PORT}/test
+    `);
+});
+
+// Gestion propre de l'arrêt
+process.on('SIGINT', () => {
+    console.log('\n👋 Arrêt du serveur proxy...');
+    process.exit(0);
 });
