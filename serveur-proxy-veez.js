@@ -18,21 +18,16 @@ app.use((req, res, next) => {
     next();
 });
 
-// ✅ SOLUTION HYBRIDE : Gestion manuelle SEULEMENT pour POST /api/prediction
+// ✅ Middleware pour parser le body JSON seulement pour POST /api/prediction
+app.use('/api/prediction', express.json());
+
+// ✅ SOLUTION CORRIGÉE : Gestion manuelle POST /api/prediction
 app.post('/api/prediction', async (req, res) => {
     try {
         console.log(`→ Manual POST proxy to https://app.veez.ai/api/prediction`);
         
-        // Lire le body de la requête
-        let body = '';
-        req.on('data', chunk => {
-            body += chunk.toString();
-        });
-        
-        await new Promise(resolve => {
-            req.on('end', resolve);
-        });
-        
+        // ✅ Le body est déjà parsé par express.json()
+        const body = JSON.stringify(req.body);
         console.log(`📤 POST body: ${body}`);
         
         // Préparer les headers
@@ -58,7 +53,7 @@ app.post('/api/prediction', async (req, res) => {
         
         console.log(`← ${response.status} from Veez API`);
         
-        // Lire la réponse complète
+        // ✅ CORRECTION : Lire la réponse correctement
         const responseText = await response.text();
         console.log(`📥 Response body: ${responseText}`);
         console.log(`📥 Response length: ${responseText.length}`);
@@ -68,12 +63,10 @@ app.post('/api/prediction', async (req, res) => {
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         
-        // Content-type
-        if (response.headers.get('content-type')) {
-            res.setHeader('Content-Type', response.headers.get('content-type'));
-        }
+        // Content-type de la réponse
+        res.setHeader('Content-Type', 'application/json');
         
-        // Envoyer la réponse
+        // ✅ Envoyer la réponse avec le bon status et le body complet
         res.status(response.status).send(responseText);
         
     } catch (error) {
