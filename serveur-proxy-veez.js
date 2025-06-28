@@ -58,8 +58,7 @@ app.use('/api', async (req, res) => {
             headers['Content-Length'] = Buffer.byteLength(body).toString();
         }
         
-        // Faire la requête vers Veez
-        const fetch = (await import('node-fetch')).default;
+        // Faire la requête vers Veez (fetch natif Node.js 18+)
         const response = await fetch(`https://app.veez.ai${req.url}`, requestOptions);
         
         console.log(`← ${response.status} from Veez API`);
