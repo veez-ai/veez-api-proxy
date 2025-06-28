@@ -37,14 +37,14 @@ const createProxy = (additionalOptions = {}) => {
         target: 'https://app.veez.ai',
         changeOrigin: true,
         secure: true,
-        timeout: 180000,        // 3 minutes
-        proxyTimeout: 180000,   // 3 minutes
+        timeout: 120000,        // 2 minutes
+        proxyTimeout: 120000,   // 2 minutes
         
-        // ✅ Configuration pour les buffers de réponse
-        buffer: true,
+        // ✅ CORRECTION : Enlever la config buffer problématique
+        // buffer: true, // ❌ Cause l'erreur pipe
         
         onProxyReq: (proxyReq, req, res) => {
-            console.log(`📤 Proxying ${req.method} to: https://app.veez.ai${req.path}`);
+            console.log(`📤 Proxying ${req.method} to: https://app.veez.ai${req.url}`);
             
             // Transmission des headers d'autorisation
             if (req.headers.authorization) {
@@ -52,7 +52,7 @@ const createProxy = (additionalOptions = {}) => {
                 console.log(`🔐 Authorization header transmitted`);
             }
             
-            // Headers additionnels pour assurer la transmission
+            // Headers additionnels essentiels
             proxyReq.setHeader('User-Agent', 'Veez-Proxy/1.0');
             proxyReq.setHeader('Accept', 'application/json');
             
@@ -69,31 +69,21 @@ const createProxy = (additionalOptions = {}) => {
         
         onProxyRes: (proxyRes, req, res) => {
             const timestamp = new Date().toISOString();
-            console.log(`✅ [${timestamp}] Response ${proxyRes.statusCode} for ${req.method} ${req.path}`);
+            console.log(`✅ [${timestamp}] Response ${proxyRes.statusCode} for ${req.method} ${req.url}`);
             console.log(`📥 Response headers:`, {
                 'content-type': proxyRes.headers['content-type'],
                 'content-length': proxyRes.headers['content-length'],
                 'cache-control': proxyRes.headers['cache-control']
             });
             
-            // ✅ CORRECTION : S'assurer que les headers CORS sont bien définis
+            // ✅ Headers CORS essentiels
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
             res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-            res.setHeader('Access-Control-Expose-Headers', 'Content-Type, Content-Length');
             
-            // ✅ DEBUG pour POST : Logger le contenu de la réponse
-            if (req.method === 'POST') {
-                let responseBody = '';
-                
-                proxyRes.on('data', (chunk) => {
-                    responseBody += chunk.toString();
-                });
-                
-                proxyRes.on('end', () => {
-                    console.log(`📥 Complete response body for POST:`, responseBody);
-                    console.log(`📥 Response body length: ${responseBody.length}`);
-                });
+            // ✅ Debug simple pour POST
+            if (req.method === 'POST' && proxyRes.statusCode === 201) {
+                console.log(`✅ POST successful - Status 201`);
             }
         },
         
@@ -103,24 +93,19 @@ const createProxy = (additionalOptions = {}) => {
                 message: err.message,
                 code: err.code,
                 method: req.method,
-                path: req.path
+                url: req.url
             });
             
             // Éviter les double responses
             if (!res.headersSent) {
-                res.status(500).json({
-                    error: 'Erreur du serveur proxy',
+                res.status(502).json({
+                    error: 'Proxy error',
                     message: err.message,
                     code: err.code,
                     timestamp: timestamp
                 });
             }
-        },
-        
-        // ✅ Configuration pour gérer les réponses de différents types
-        pathRewrite: {
-            // Pas de réécriture, on garde les paths tels quels
-        },
+        }
         
         ...additionalOptions
     });
