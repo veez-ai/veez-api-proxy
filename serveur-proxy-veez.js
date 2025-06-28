@@ -18,48 +18,43 @@ app.use((req, res, next) => {
     next();
 });
 
-// ✅ SOLUTION : Proxy manuel pour gérer correctement les réponses
-app.use('/api', async (req, res) => {
+// ✅ SOLUTION HYBRIDE : Gestion manuelle SEULEMENT pour POST /api/prediction
+app.post('/api/prediction', async (req, res) => {
     try {
-        console.log(`→ Proxying ${req.method} https://app.veez.ai${req.url}`);
+        console.log(`→ Manual POST proxy to https://app.veez.ai/api/prediction`);
         
-        // Préparer les headers pour la requête vers Veez
+        // Lire le body de la requête
+        let body = '';
+        req.on('data', chunk => {
+            body += chunk.toString();
+        });
+        
+        await new Promise(resolve => {
+            req.on('end', resolve);
+        });
+        
+        console.log(`📤 POST body: ${body}`);
+        
+        // Préparer les headers
         const headers = {
             'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(body).toString(),
             'User-Agent': 'Veez-Proxy/1.0'
         };
         
-        // Ajouter l'authorization si présent
+        // Ajouter l'authorization
         if (req.headers.authorization) {
             headers['Authorization'] = req.headers.authorization;
             console.log(`🔐 Auth forwarded`);
         }
         
-        // Configuration de la requête
-        const requestOptions = {
-            method: req.method,
-            headers: headers
-        };
-        
-        // Pour POST, ajouter le body
-        if (req.method === 'POST') {
-            let body = '';
-            req.on('data', chunk => {
-                body += chunk.toString();
-            });
-            
-            await new Promise(resolve => {
-                req.on('end', resolve);
-            });
-            
-            console.log(`📤 POST body: ${body}`);
-            requestOptions.body = body;
-            headers['Content-Type'] = 'application/json';
-            headers['Content-Length'] = Buffer.byteLength(body).toString();
-        }
-        
-        // Faire la requête vers Veez (fetch natif Node.js 18+)
-        const response = await fetch(`https://app.veez.ai${req.url}`, requestOptions);
+        // Faire la requête vers Veez
+        const response = await fetch('https://app.veez.ai/api/prediction', {
+            method: 'POST',
+            headers: headers,
+            body: body
+        });
         
         console.log(`← ${response.status} from Veez API`);
         
@@ -68,21 +63,21 @@ app.use('/api', async (req, res) => {
         console.log(`📥 Response body: ${responseText}`);
         console.log(`📥 Response length: ${responseText.length}`);
         
-        // Définir les headers CORS
+        // Headers CORS
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         
-        // Définir le content-type
+        // Content-type
         if (response.headers.get('content-type')) {
             res.setHeader('Content-Type', response.headers.get('content-type'));
         }
         
-        // Envoyer la réponse avec le bon status et le body complet
+        // Envoyer la réponse
         res.status(response.status).send(responseText);
         
     } catch (error) {
-        console.error(`❌ Proxy error: ${error.message}`);
+        console.error(`❌ Manual POST proxy error: ${error.message}`);
         res.status(500).json({
             error: 'Proxy error',
             message: error.message
@@ -90,27 +85,47 @@ app.use('/api', async (req, res) => {
     }
 });
 
-// Routes utilitaires
-app.get('/test', (req, res) => {
-    res.json({
-        status: 'OK',
-        message: 'Proxy Veez.ai MANUEL - Gestion complète du body',
-        timestamp: new Date().toISOString()
-    });
+// ✅ Proxy automatique pour TOUT LE RESTE (auth, GET, etc.)
+const autoProxy = createProxyMiddleware({
+    target: 'https://app.veez.ai',
+    changeOrigin: true,
+    secure: true,
+    timeout: 120000,
+    proxyTimeout: 120000,
+    
+    onProxyReq: (proxyReq, req) => {
+        console.log(`→ Auto proxy ${req.method} https://app.veez.ai${req.url}`);
+        
+        if (req.headers.authorization) {
+            proxyReq.setHeader('Authorization', req.headers.authorization);
+        }
+    },
+    
+    onProxyRes: (proxyRes, req) => {
+        console.log(`← ${proxyRes.statusCode} for ${req.method} ${req.url}`);
+        
+        // Headers CORS
+        proxyRes.headers['access-control-allow-origin'] = '*';
+        proxyRes.headers['access-control-allow-methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+        proxyRes.headers['access-control-allow-headers'] = 'Content-Type, Authorization, X-Requested-With';
+    },
+    
+    onError: (err, req, res) => {
+        console.error(`❌ Auto proxy error: ${err.message}`);
+        if (!res.headersSent) {
+            res.status(502).json({ error: 'Proxy error', message: err.message });
+        }
+    }
 });
 
-app.get('/', (req, res) => {
-    res.send(`
-        <h1>🚀 Proxy Veez.ai MANUEL</h1>
-        <p>✅ Gestion manuelle du body des réponses</p>
-        <p>🔗 <a href="/test">Test</a></p>
-    `);
-});
+// Appliquer le proxy automatique à toutes les autres routes
+app.use('/', autoProxy);
 
 // Démarrage
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-    console.log('🚀 Proxy Veez.ai MANUEL démarré !');
+    console.log('🚀 Proxy Veez.ai HYBRIDE démarré !');
     console.log(`📍 Port: ${PORT}`);
-    console.log('✅ Gestion manuelle du body appliquée');
+    console.log('✅ POST /api/prediction: Manuel (body complet)');
+    console.log('✅ Tout le reste: Proxy automatique (auth, GET, etc.)');
 });
