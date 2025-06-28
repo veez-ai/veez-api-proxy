@@ -1,7 +1,6 @@
 const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const cors = require('cors');
-const multer = require('multer');
 
 const app = express();
 
@@ -12,15 +11,6 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     credentials: false
 }));
-
-// Configuration Multer pour le traitement des fichiers
-const upload = multer({ 
-    storage: multer.memoryStorage(),
-    limits: {
-        fileSize: 10 * 1024 * 1024, // 10MB max
-        files: 10 // Maximum 10 fichiers
-    }
-});
 
 // Middleware pour parser le JSON
 app.use(express.json());
@@ -35,9 +25,6 @@ app.use((req, res, next) => {
     if (req.body && Object.keys(req.body).length > 0) {
         console.log(`   Body:`, Object.keys(req.body));
     }
-    if (req.files && req.files.length > 0) {
-        console.log(`   Files:`, req.files.map(f => f.originalname));
-    }
     next();
 });
 
@@ -47,7 +34,7 @@ const createProxy = (additionalOptions = {}) => {
         target: 'https://app.veez.ai',
         changeOrigin: true,
         secure: true,
-        timeout: 60000, // Augmenté pour les opérations longues
+        timeout: 60000,
         proxyTimeout: 60000,
         onProxyReq: (proxyReq, req) => {
             // S'assurer que les headers sont bien transmis
@@ -93,39 +80,20 @@ app.get('/api/product/', createProxy());
 // Détail d'un produit
 app.get('/api/product/:productId', createProxy());
 
-// Création d'un produit avec gestion des fichiers
-app.post('/api/product/', upload.array('texture'), (req, res, next) => {
-    console.log('📦 Création de produit avec textures');
+// Création d'un produit (ATTENTION: sans gestion des fichiers pour l'instant)
+app.post('/api/product/', (req, res, next) => {
+    console.log('📦 Création de produit (sans upload de fichiers)');
     console.log('   Body:', req.body);
-    console.log('   Files:', req.files?.map(f => ({ name: f.originalname, size: f.size })));
     
-    // Créer un proxy spécial pour les uploads
-    const uploadProxy = createProxyMiddleware({
-        target: 'https://app.veez.ai',
-        changeOrigin: true,
-        secure: true,
+    // IMPORTANT: Cette route ne gère PAS encore les uploads de fichiers
+    // Pour les fichiers, vous devrez utiliser votre frontend pour envoyer
+    // directement les FormData au proxy
+    
+    const uploadProxy = createProxy({
         timeout: 120000, // 2 minutes pour les uploads
         proxyTimeout: 120000,
-        onProxyReq: (proxyReq, req) => {
-            if (req.headers.authorization) {
-                proxyReq.setHeader('Authorization', req.headers.authorization);
-            }
-            
-            // Pour les uploads multipart, on laisse multer et le proxy gérer
-            if (req.is('multipart/form-data')) {
-                // Le proxy va automatiquement gérer le multipart
-                return;
-            }
-        },
         onProxyRes: (proxyRes, req, res) => {
             console.log(`✅ Product creation response ${proxyRes.statusCode}`);
-        },
-        onError: (err, req, res) => {
-            console.error('❌ Product creation error:', err.message);
-            res.status(500).json({
-                error: 'Erreur lors de la création du produit',
-                message: err.message
-            });
         }
     });
     
@@ -156,7 +124,7 @@ app.get('/api/prediction/', createProxy());
 app.get('/api/prediction/:predictionId', createProxy());
 
 // Création d'une prédiction
-app.post('/api/prediction/', upload.none(), (req, res, next) => {
+app.post('/api/prediction/', (req, res, next) => {
     console.log(`🔮 Création de prédiction`);
     console.log('   Produit:', req.body.product_id);
     console.log('   Prompt:', req.body.prompt);
@@ -194,7 +162,7 @@ app.get('/test', (req, res) => {
             // Products  
             'list_products': 'GET /api/product/',
             'get_product': 'GET /api/product/{product_id}',
-            'create_product': 'POST /api/product/',
+            'create_product': 'POST /api/product/ (⚠️ Upload files via FormData)',
             'generate_lora': 'POST /api/product/{product_id}/generate-lora',
             
             // Predictions
@@ -204,12 +172,16 @@ app.get('/test', (req, res) => {
         },
         features: [
             '✅ Gestion complète des templates',
-            '✅ Création de produits avec upload de textures',
+            '⚠️ Création de produits (upload files via FormData frontend)',
             '✅ Génération de LoRA',
             '✅ Création et gestion des prédictions',
             '✅ Timeouts adaptés par type d\'opération',
             '✅ Logging détaillé',
             '✅ Gestion d\'erreurs améliorée'
+        ],
+        notes: [
+            'Pour les uploads de fichiers, utilisez FormData depuis votre frontend',
+            'Le proxy transmettra automatiquement les fichiers à l\'API Veez.ai'
         ]
     });
 });
@@ -266,7 +238,7 @@ app.get('/', (req, res) => {
     res.send(`
         <html>
         <head>
-            <title>🚀 Serveur Proxy Veez.ai Complet</title>
+            <title>🚀 Serveur Proxy Veez.ai</title>
             <style>
                 body { font-family: Arial, sans-serif; max-width: 1000px; margin: 50px auto; padding: 20px; }
                 h1 { color: #2563eb; }
@@ -276,17 +248,19 @@ app.get('/', (req, res) => {
                 .post { border-left: 4px solid #f59e0b; }
                 .status { color: #059669; }
                 .feature { color: #6366f1; }
+                .warning { background: #fef3c7; padding: 15px; border-radius: 5px; border-left: 4px solid #f59e0b; margin: 15px 0; }
                 pre { background: #374151; color: #f9fafb; padding: 15px; border-radius: 5px; overflow-x: auto; }
                 .section { margin: 20px 0; }
-                .warning { background: #fef3c7; padding: 15px; border-radius: 5px; border-left: 4px solid #f59e0b; }
             </style>
         </head>
         <body>
-            <h1>🚀 Serveur Proxy Veez.ai Complet</h1>
+            <h1>🚀 Serveur Proxy Veez.ai</h1>
             <p class="status">Le serveur proxy est opérationnel sur le port ${PORT || 3001}</p>
             
             <div class="warning">
-                <strong>⚠️ Important :</strong> Assurez-vous d'avoir votre token API Veez.ai pour utiliser ces endpoints.
+                <strong>⚠️ Upload de fichiers :</strong> Cette version ne gère pas encore l'upload via Multer. 
+                Pour créer des produits avec des textures, utilisez FormData depuis votre frontend - 
+                le proxy transmettra automatiquement les fichiers.
             </div>
             
             <div class="section">
@@ -299,7 +273,7 @@ app.get('/', (req, res) => {
                 <h2>📦 Produits</h2>
                 <div class="endpoint get"><strong>GET</strong> ${baseUrl}/api/product/ - Liste des produits</div>
                 <div class="endpoint get"><strong>GET</strong> ${baseUrl}/api/product/{id} - Détail d'un produit</div>
-                <div class="endpoint post"><strong>POST</strong> ${baseUrl}/api/product/ - Créer un produit (avec textures)</div>
+                <div class="endpoint post"><strong>POST</strong> ${baseUrl}/api/product/ - Créer un produit</div>
                 <div class="endpoint post"><strong>POST</strong> ${baseUrl}/api/product/{id}/generate-lora - Générer LoRA</div>
             </div>
             
@@ -316,55 +290,42 @@ app.get('/', (req, res) => {
                 <div class="endpoint get"><strong>GET</strong> <a href="${baseUrl}/test/auth">${baseUrl}/test/auth</a> - Test authentification</div>
             </div>
             
-            <h2>🎯 Fonctionnalités</h2>
-            <ul>
-                <li class="feature">✅ Gestion complète de l'API Veez.ai</li>
-                <li class="feature">✅ Upload de fichiers pour les textures</li>
-                <li class="feature">✅ Timeouts adaptés par type d'opération</li>
-                <li class="feature">✅ Logging détaillé des requêtes</li>
-                <li class="feature">✅ Gestion d'erreurs améliorée</li>
-                <li class="feature">✅ Test d'authentification intégré</li>
-            </ul>
-            
             <h2>📖 Exemples d'utilisation</h2>
             
             <h3>Lister les templates :</h3>
             <pre>curl -H "Authorization: Bearer YOUR_TOKEN" ${baseUrl}/api/template/</pre>
             
-            <h3>Créer un produit :</h3>
-            <pre>curl -X POST ${baseUrl}/api/product/ \\
-  -H "Authorization: Bearer YOUR_TOKEN" \\
-  -F "template_id=362" \\
-  -F "name=Mon Produit" \\
-  -F "description=Description du produit" \\
-  -F "texture[0]=@image1.jpg" \\
-  -F "texture[0][key]=TEX01"</pre>
-            
-            <h3>Générer une LoRA :</h3>
-            <pre>curl -X POST ${baseUrl}/api/product/PRODUCT_ID/generate-lora \\
-  -H "Authorization: Bearer YOUR_TOKEN"</pre>
+            <h3>Créer un produit (depuis JavaScript frontend) :</h3>
+            <pre>const formData = new FormData();
+formData.append('template_id', '362');
+formData.append('name', 'Mon Produit');
+formData.append('description', 'Description');
+formData.append('texture[0]', fileInput.files[0]);
+formData.append('texture[0][key]', 'TEX01');
+
+fetch('${baseUrl}/api/product/', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN'
+  },
+  body: formData
+});</pre>
             
             <h3>Créer une prédiction :</h3>
             <pre>curl -X POST ${baseUrl}/api/prediction/ \\
   -H "Authorization: Bearer YOUR_TOKEN" \\
-  -F "product_id=PRODUCT_ID" \\
-  -F "prompt=Un produit dans un environnement moderne" \\
-  -F "aspect_ratio=1:1"</pre>
-            
-            <h2>⚙️ Configuration</h2>
-            <p>Pour utiliser ce proxy avec votre application :</p>
-            <ol>
-                <li>Remplacez <code>https://app.veez.ai/api/</code> par <code>${baseUrl}/api/</code></li>
-                <li>Gardez ce serveur en marche</li>
-                <li>Utilisez votre token API Veez.ai dans les headers Authorization</li>
-            </ol>
+  -H "Content-Type: application/json" \\
+  -d '{
+    "product_id": "PRODUCT_ID",
+    "prompt": "Un produit dans un environnement moderne",
+    "aspect_ratio": "1:1"
+  }'</pre>
             
             <h2>📊 Status :</h2>
             <div class="status">✅ Express server running</div>
             <div class="status">✅ CORS enabled</div>
-            <div class="status">✅ File upload support</div>
             <div class="status">✅ All Veez.ai endpoints configured</div>
-            <div class="status">✅ Enhanced error handling</div>
+            <div class="status">⚠️ File upload: via FormData frontend</div>
         </body>
         </html>
     `);
@@ -385,7 +346,7 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     const baseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
     
-    console.log('🚀 Serveur Proxy Veez.ai Complet démarré !');
+    console.log('🚀 Serveur Proxy Veez.ai démarré !');
     console.log('='.repeat(50));
     console.log(`📍 URL: ${baseUrl}`);
     console.log(`🔗 API Proxy: ${baseUrl}/api/`);
@@ -399,21 +360,18 @@ app.listen(PORT, () => {
     console.log('   Produits:');
     console.log(`     GET  ${baseUrl}/api/product/`);
     console.log(`     GET  ${baseUrl}/api/product/{id}`);
-    console.log(`     POST ${baseUrl}/api/product/`);
+    console.log(`     POST ${baseUrl}/api/product/ (FormData)`);
     console.log(`     POST ${baseUrl}/api/product/{id}/generate-lora`);
     console.log('   Prédictions:');
     console.log(`     GET  ${baseUrl}/api/prediction/`);
     console.log(`     GET  ${baseUrl}/api/prediction/{id}`);
     console.log(`     POST ${baseUrl}/api/prediction/`);
     console.log('');
-    console.log('🎯 Fonctionnalités ajoutées:');
-    console.log('   ✅ Gestion complète de l\'API Veez.ai');
-    console.log('   ✅ Upload de fichiers (textures)');
-    console.log('   ✅ Timeouts adaptés (60s-5min)');
-    console.log('   ✅ Logging détaillé');
-    console.log('   ✅ Test d\'authentification');
+    console.log('⚠️  Upload de fichiers:');
+    console.log('   Utilisez FormData depuis votre frontend');
+    console.log('   Le proxy transmettra automatiquement à Veez.ai');
     console.log('');
-    console.log('💡 N\'oubliez pas d\'installer multer:');
+    console.log('💡 Pour installer Multer plus tard:');
     console.log('   npm install multer');
     console.log('');
 });
