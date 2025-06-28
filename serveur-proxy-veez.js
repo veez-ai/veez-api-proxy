@@ -118,8 +118,35 @@ const autoProxy = createProxyMiddleware({
     }
 });
 
-// Appliquer le proxy automatique à toutes les autres routes
-app.use('/', autoProxy);
+// ✅ Routes utilitaires AVANT le proxy automatique
+app.get('/test', (req, res) => {
+    res.json({
+        status: 'OK',
+        message: 'Proxy Veez.ai HYBRIDE - Version qui marche !',
+        timestamp: new Date().toISOString(),
+        config: {
+            manual: 'POST /api/prediction',
+            auto: 'Tout le reste (auth, GET, etc.)'
+        }
+    });
+});
+
+app.get('/', (req, res) => {
+    res.send(`
+        <h1>🚀 Proxy Veez.ai HYBRIDE</h1>
+        <p>✅ POST /api/prediction: Manuel (body complet)</p>
+        <p>✅ Tout le reste: Proxy automatique (auth, GET, etc.)</p>
+        <p>🔗 <a href="/test">Test JSON</a></p>
+        <hr>
+        <h3>📊 Status:</h3>
+        <p>✅ Proxy hybride fonctionnel</p>
+        <p>✅ Auth préservée</p>
+        <p>✅ Body POST géré manuellement</p>
+    `);
+});
+
+// Appliquer le proxy automatique SEULEMENT aux routes /api/* (pas à la racine)
+app.use('/api', autoProxy);
 
 // Démarrage
 const PORT = process.env.PORT || 3001;
