@@ -18,64 +18,70 @@ app.use((req, res, next) => {
     next();
 });
 
-// ✅ Middleware pour parser le body JSON seulement pour POST /api/prediction
-app.use('/api/prediction', express.json());
+// ✅ Middleware pour parser le body AVANT la route POST
+app.use('/api/prediction', express.json({ limit: '10mb' }));
 
-// ✅ SOLUTION CORRIGÉE : Gestion manuelle POST /api/prediction
+// ✅ Route POST corrigée
 app.post('/api/prediction', async (req, res) => {
-    try {
-        console.log(`→ Manual POST proxy to https://app.veez.ai/api/prediction`);
-        
-        // ✅ Le body est déjà parsé par express.json()
-        const body = JSON.stringify(req.body);
-        console.log(`📤 POST body: ${body}`);
-        
-        // Préparer les headers
-        const headers = {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(body).toString(),
-            'User-Agent': 'Veez-Proxy/1.0'
-        };
-        
-        // Ajouter l'authorization
-        if (req.headers.authorization) {
-            headers['Authorization'] = req.headers.authorization;
-            console.log(`🔐 Auth forwarded`);
-        }
-        
-        // Faire la requête vers Veez
-        const response = await fetch('https://app.veez.ai/api/prediction', {
-            method: 'POST',
-            headers: headers,
-            body: body
-        });
-        
-        console.log(`← ${response.status} from Veez API`);
-        
-        // ✅ CORRECTION : Lire la réponse correctement
-        const responseText = await response.text();
-        console.log(`📥 Response body: ${responseText}`);
-        console.log(`📥 Response length: ${responseText.length}`);
-        
-        // Headers CORS
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-        
-        // Content-type de la réponse
-        res.setHeader('Content-Type', 'application/json');
-        
-        // ✅ Envoyer la réponse avec le bon status et le body complet
-        res.status(response.status).send(responseText);
-        
-    } catch (error) {
-        console.error(`❌ Manual POST proxy error: ${error.message}`);
-        res.status(500).json({
-            error: 'Proxy error',
-            message: error.message
-        });
+  try {
+    console.log('📥 Received POST /api/prediction');
+    console.log('📥 Raw body:', req.body);
+    console.log('📥 Body type:', typeof req.body);
+    console.log('📥 Body keys:', Object.keys(req.body || {}));
+    
+    // Vérifier que le body existe
+    if (!req.body || Object.keys(req.body).length === 0) {
+      console.error('❌ Empty body received');
+      return res.status(400).json({ error: 'Empty request body' });
     }
+    
+    const body = JSON.stringify(req.body);
+    console.log(`📤 POST body: ${body}`);
+    
+    // Headers pour la requête vers Veez
+    const headers = {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body).toString(),
+      'User-Agent': 'Veez-Proxy/1.0'
+    };
+    
+    // Authorization
+    if (req.headers.authorization) {
+      headers['Authorization'] = req.headers.authorization;
+      console.log(`🔐 Auth forwarded`);
+    }
+    
+    // Requête vers Veez
+    const response = await fetch('https://app.veez.ai/api/prediction', {
+      method: 'POST',
+      headers: headers,
+      body: body
+    });
+    
+    console.log(`← ${response.status} from Veez API`);
+    
+    // Lire la réponse
+    const responseText = await response.text();
+    console.log(`📥 Response body: ${responseText}`);
+    console.log(`📥 Response length: ${responseText.length}`);
+    
+    // Headers CORS
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.setHeader('Content-Type', 'application/json');
+    
+    // Retourner la réponse
+    res.status(response.status).send(responseText);
+    
+  } catch (error) {
+    console.error(`❌ Manual POST proxy error:`, error);
+    res.status(500).json({
+      error: 'Proxy error',
+      message: error.message
+    });
+  }
 });
 
 // ✅ Proxy automatique pour TOUT LE RESTE (auth, GET, etc.)
