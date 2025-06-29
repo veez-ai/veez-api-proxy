@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: veez-proxy
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: VEEZ_TOKEN
+        sync: false
