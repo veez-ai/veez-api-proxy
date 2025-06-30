@@ -8,45 +8,52 @@ const app = express();
 const upload = multer();
 
 const VEEZ_API_URL = 'https://app.veez.ai/api';
-const VEEZ_TOKEN = process.env.VEEZ_TOKEN || '1e303a3204e2fe743513ddca0c4f31bc';
+const VEEZ_TOKEN = process.env.VEEZ_TOKEN;
 
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// 🔍 Debug middleware
+// Middleware de debug
 app.use((req, res, next) => {
   console.log(`[${req.method}] ${req.originalUrl}`);
   next();
 });
 
+// Headers communs avec token sécurisé
 function forwardHeaders() {
   return {
     Authorization: `Bearer ${VEEZ_TOKEN}`,
   };
 }
 
-// GET proxy (ex: /api/template/)
-app.get('/api/:endpoint', async (req, res) => {
+// ✅ GET générique avec routes dynamiques (ex: /api/product/xxx/)
+app.get('/api/:endpoint(*)', async (req, res) => {
   const endpoint = req.params.endpoint;
   const response = await fetch(`${VEEZ_API_URL}/${endpoint}/`, {
     headers: forwardHeaders(),
   });
-  const data = await response.json();
-  res.status(response.status).json(data);
+
+  const contentType = response.headers.get('content-type');
+  if (contentType && contentType.includes('application/json')) {
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } else {
+    const text = await response.text();
+    res.status(response.status).send(text);
+  }
 });
 
-// POST proxy (ex: /api/prediction)
-app.post('/api/:endpoint', upload.any(), async (req, res) => {
+// ✅ POST générique (ex: /api/prediction)
+app.post('/api/:endpoint(*)', upload.any(), async (req, res) => {
   const endpoint = req.params.endpoint;
-
   const isMultipart = req.headers['content-type']?.includes('multipart/form-data');
 
   let body;
   let headers;
 
   if (isMultipart) {
-    // 🔁 Recréer un vrai FormData pour envoyer vers Veez
+    // Recréation d'un FormData si fichier(s)
     const form = new FormData();
     for (const key in req.body) form.append(key, req.body[key]);
     for (const file of req.files) {
@@ -89,5 +96,5 @@ app.post('/api/:endpoint', upload.any(), async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ Proxy démarré sur http://localhost:${PORT}`);
+  console.log(`✅ Proxy Veez en ligne sur http://localhost:${PORT}`);
 });
