@@ -7,11 +7,11 @@ const app = express();
 // CORS permissif
 app.use(cors());
 
-// Parser JSON et form-urlencoded avec taille augmentée
+// Parser JSON avec debug
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Middleware de debug
+// Debug middleware
 app.use((req, res, next) => {
   console.log(`[DEBUG] ${req.method} ${req.originalUrl}`);
   console.log('[DEBUG] Body:', req.body);
@@ -24,13 +24,13 @@ const VEEZ_TOKEN = process.env.VEEZ_TOKEN || '1e303a3204e2fe743513ddca0c4f31bc';
 // Test du proxy
 app.get('/', (req, res) => {
   res.json({ 
-    status: 'Proxy Veez.ai OK FIXED', 
+    status: 'Proxy Veez.ai FINAL - JSON FORMAT', 
     time: new Date().toISOString(),
-    tokenConfigured: !!VEEZ_TOKEN && VEEZ_TOKEN !== 'REMPLACEZ_PAR_VOTRE_TOKEN'
+    tokenConfigured: !!VEEZ_TOKEN
   });
 });
 
-// Proxy pour Veez.ai
+// Proxy pour Veez.ai - SOLUTION FINALE
 app.all('/api/*', async (req, res) => {
   const veezUrl = `https://app.veez.ai${req.originalUrl}`;
   
@@ -44,20 +44,16 @@ app.all('/api/*', async (req, res) => {
       'User-Agent': 'VeezProxy/1.0'
     };
 
+    // SOLUTION: Envoyer en JSON au lieu de form-urlencoded
     if (req.method === 'POST' && req.body && Object.keys(req.body).length > 0) {
-      console.log('[PROXY] Processing POST with body');
+      console.log('[PROXY] Processing POST with JSON body');
       
-      // Conversion en form-urlencoded
-      const params = new URLSearchParams();
-      Object.keys(req.body).forEach(key => {
-        console.log(`[PROXY] Adding: ${key} = ${req.body[key]}`);
-        params.append(key, req.body[key]);
-      });
+      // ✅ CORRECTION: JSON au lieu de URLSearchParams
+      body = JSON.stringify(req.body);
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = Buffer.byteLength(body);
       
-      body = params.toString();
-      headers['Content-Type'] = 'application/x-www-form-urlencoded';
-      
-      console.log('[PROXY] Sending body:', body);
+      console.log('[PROXY] Sending JSON body:', body);
     } else if (req.method === 'POST') {
       console.log('[PROXY] POST without valid body');
     }
@@ -68,10 +64,10 @@ app.all('/api/*', async (req, res) => {
       body: body
     });
 
-    console.log(`[PROXY] Response status: ${response.status}`);
+    console.log(`[PROXY] Veez response status: ${response.status}`);
     
     const data = await response.text();
-    console.log(`[PROXY] Response preview: ${data.substring(0, 200)}...`);
+    console.log(`[PROXY] Veez response: ${data.substring(0, 300)}...`);
     
     try {
       const jsonData = JSON.parse(data);
@@ -92,6 +88,6 @@ app.all('/api/*', async (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`🚀 Proxy Veez.ai FIXED sur port ${PORT}`);
+  console.log(`🚀 Proxy Veez.ai FINAL JSON sur port ${PORT}`);
   console.log(`📝 Token: ${VEEZ_TOKEN ? 'Configuré' : 'MANQUANT'}`);
 });
