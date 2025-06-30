@@ -2,171 +2,92 @@ const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
 const multer = require('multer');
+const FormData = require('form-data');
 
 const app = express();
-
-// CORS complet
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'X-Requested-With',
-    'Accept',
-    'Origin'
-  ],
-  credentials: false,
-  optionsSuccessStatus: 200
-}));
-
-// Headers CORS manuels
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With, Accept, Origin');
-
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(200);
-    return;
-  }
-  next();
-});
-
-// Parser pour multipart/form-data
 const upload = multer();
 
-// Middleware conditionnel selon le Content-Type
+const VEEZ_API_URL = 'https://app.veez.ai/api';
+const VEEZ_TOKEN = process.env.VEEZ_TOKEN || '1e303a3204e2fe743513ddca0c4f31bc';
+
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// 🔍 Debug middleware
 app.use((req, res, next) => {
-  const contentType = req.headers['content-type'] || '';
-
-  console.log(`[PARSER] ${req.method} ${req.originalUrl}`);
-  console.log('[PARSER] Content-Type:', contentType);
-
-  if (contentType.includes('multipart/form-data')) {
-    console.log('[PARSER] Using multer for multipart/form-data');
-    upload.any()(req, res, next);
-  } else if (contentType.includes('application/json')) {
-    console.log('[PARSER] Using express.json()');
-    express.json({ limit: '10mb' })(req, res, next);
-  } else if (contentType.includes('application/x-www-form-urlencoded')) {
-    console.log('[PARSER] Using express.urlencoded()');
-    express.urlencoded({ extended: true, limit: '10mb' })(req, res, next);
-  } else {
-    console.log('[PARSER] No specific parser, continuing...');
-    next();
-  }
-});
-
-// Debug middleware
-app.use((req, res, next) => {
-  console.log(`[DEBUG] ${req.method} ${req.originalUrl}`);
-  console.log('[DEBUG] Content-Type:', req.headers['content-type']);
-  console.log('[DEBUG] Body:', req.body);
-  console.log('[DEBUG] Body keys:', Object.keys(req.body || {}));
-  console.log('[DEBUG] Files:', req.files ? req.files.length : 0);
+  console.log(`[${req.method}] ${req.originalUrl}`);
   next();
 });
 
-const VEEZ_TOKEN = process.env.VEEZ_TOKEN || '1e303a3204e2fe743513ddca0c4f31bc';
+function forwardHeaders() {
+  return {
+    Authorization: `Bearer ${VEEZ_TOKEN}`,
+  };
+}
 
-app.get('/', (req, res) => {
-  res.json({
-    status: 'Proxy Veez.ai MULTIPART SUPPORT',
-    time: new Date().toISOString(),
-    tokenConfigured: !!VEEZ_TOKEN,
-    supportedParsers: ['JSON', 'urlencoded', 'multipart/form-data']
+// GET proxy (ex: /api/template/)
+app.get('/api/:endpoint', async (req, res) => {
+  const endpoint = req.params.endpoint;
+  const response = await fetch(`${VEEZ_API_URL}/${endpoint}/`, {
+    headers: forwardHeaders(),
   });
+  const data = await response.json();
+  res.status(response.status).json(data);
 });
 
-// Proxy avec support multipart et query
-app.all('/api/*', async (req, res) => {
-  // 🛠 let au lieu de const
-  let veezUrl = `https://app.veez.ai${req.path}`;
+// POST proxy (ex: /api/prediction)
+app.post('/api/:endpoint', upload.any(), async (req, res) => {
+  const endpoint = req.params.endpoint;
 
-  // 🛠 Ajout des query params pour GET
-  if (req.method === 'GET' && Object.keys(req.query).length > 0) {
-    const url = new URL(veezUrl);
-    Object.entries(req.query).forEach(([key, value]) => {
-      url.searchParams.append(key, value);
-    });
-    veezUrl = url.toString();
+  const isMultipart = req.headers['content-type']?.includes('multipart/form-data');
+
+  let body;
+  let headers;
+
+  if (isMultipart) {
+    // 🔁 Recréer un vrai FormData pour envoyer vers Veez
+    const form = new FormData();
+    for (const key in req.body) form.append(key, req.body[key]);
+    for (const file of req.files) {
+      form.append(file.fieldname, file.buffer, file.originalname);
+    }
+
+    body = form;
+    headers = {
+      ...forwardHeaders(),
+      ...form.getHeaders(),
+    };
+  } else {
+    body = JSON.stringify(req.body);
+    headers = {
+      ...forwardHeaders(),
+      'Content-Type': 'application/json',
+    };
   }
-
-  console.log(`[PROXY] ${req.method} ${veezUrl}`);
-  console.log('[PROXY] Body received:', req.body);
-  console.log('[PROXY] Files received:', req.files ? req.files.length : 0);
 
   try {
-    let body = null;
-    let headers = {
-      'Authorization': `Bearer ${VEEZ_TOKEN}`,
-      'User-Agent': 'VeezProxy/1.0'
-    };
-
-    if (req.method === 'POST') {
-      const contentType = req.headers['content-type'] || '';
-
-      if (contentType.includes('multipart/form-data') && req.body && Object.keys(req.body).length > 0) {
-        console.log('[PROXY] Processing multipart/form-data as JSON');
-
-        body = JSON.stringify(req.body);
-        headers['Content-Type'] = 'application/json';
-        headers['Content-Length'] = Buffer.byteLength(body);
-
-        console.log('[PROXY] Converted multipart to JSON:', body);
-
-      } else if (req.body && Object.keys(req.body).length > 0) {
-        console.log('[PROXY] Processing regular JSON body');
-
-        body = JSON.stringify(req.body);
-        headers['Content-Type'] = 'application/json';
-        headers['Content-Length'] = Buffer.byteLength(body);
-
-        console.log('[PROXY] Sending JSON body:', body);
-
-      } else {
-        console.log('[PROXY] POST without valid body');
-        console.log('[PROXY] Content-Type was:', contentType);
-        console.log('[PROXY] req.body:', req.body);
-        console.log('[PROXY] req.files:', req.files);
-      }
-    }
-
-    const response = await fetch(veezUrl, {
-      method: req.method,
-      headers: headers,
-      body: body
+    const response = await fetch(`${VEEZ_API_URL}/${endpoint}/`, {
+      method: 'POST',
+      body,
+      headers,
     });
 
-    console.log(`[PROXY] Veez response status: ${response.status}`);
-
-    const data = await response.text();
-    console.log(`[PROXY] Veez response: ${data.substring(0, 300)}...`);
-
-    res.header('Access-Control-Allow-Origin', '*');
-
-    try {
-      const jsonData = JSON.parse(data);
-      res.status(response.status).json(jsonData);
-    } catch {
-      res.status(response.status).send(data);
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      const data = await response.json();
+      res.status(response.status).json(data);
+    } else {
+      const text = await response.text();
+      res.status(response.status).send(text);
     }
-
   } catch (error) {
-    console.error('[PROXY] Error:', error);
-    res.header('Access-Control-Allow-Origin', '*');
-    res.status(500).json({
-      error: error.message,
-      url: veezUrl,
-      method: req.method
-    });
+    console.error('[ERROR]', error);
+    res.status(500).json({ error: 'Erreur lors de l’appel à l’API Veez' });
   }
 });
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Proxy Veez.ai MULTIPART SUPPORT sur port ${PORT}`);
-  console.log(`📝 Token: ${VEEZ_TOKEN ? 'Configuré' : 'MANQUANT'}`);
-  console.log(`📦 Parsers: JSON, urlencoded, multipart/form-data`);
+  console.log(`✅ Proxy démarré sur http://localhost:${PORT}`);
 });
