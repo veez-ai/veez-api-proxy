@@ -10,9 +10,9 @@ app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
-    'Content-Type', 
-    'Authorization', 
-    'X-Requested-With', 
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
     'Accept',
     'Origin'
   ],
@@ -25,7 +25,7 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With, Accept, Origin');
-  
+
   if (req.method === 'OPTIONS') {
     res.sendStatus(200);
     return;
@@ -33,16 +33,16 @@ app.use((req, res, next) => {
   next();
 });
 
-// SOLUTION: Parser pour multipart/form-data
+// Parser pour multipart/form-data
 const upload = multer();
 
 // Middleware conditionnel selon le Content-Type
 app.use((req, res, next) => {
   const contentType = req.headers['content-type'] || '';
-  
+
   console.log(`[PARSER] ${req.method} ${req.originalUrl}`);
   console.log('[PARSER] Content-Type:', contentType);
-  
+
   if (contentType.includes('multipart/form-data')) {
     console.log('[PARSER] Using multer for multipart/form-data');
     upload.any()(req, res, next);
@@ -70,24 +70,33 @@ app.use((req, res, next) => {
 
 const VEEZ_TOKEN = process.env.VEEZ_TOKEN || '1e303a3204e2fe743513ddca0c4f31bc';
 
-// Test du proxy
 app.get('/', (req, res) => {
-  res.json({ 
-    status: 'Proxy Veez.ai MULTIPART SUPPORT', 
+  res.json({
+    status: 'Proxy Veez.ai MULTIPART SUPPORT',
     time: new Date().toISOString(),
     tokenConfigured: !!VEEZ_TOKEN,
     supportedParsers: ['JSON', 'urlencoded', 'multipart/form-data']
   });
 });
 
-// Proxy pour Veez.ai avec support multipart
+// Proxy avec support multipart et query
 app.all('/api/*', async (req, res) => {
-  const veezUrl = `https://app.veez.ai${req.originalUrl}`;
-  
+  // 🛠 let au lieu de const
+  let veezUrl = `https://app.veez.ai${req.path}`;
+
+  // 🛠 Ajout des query params pour GET
+  if (req.method === 'GET' && Object.keys(req.query).length > 0) {
+    const url = new URL(veezUrl);
+    Object.entries(req.query).forEach(([key, value]) => {
+      url.searchParams.append(key, value);
+    });
+    veezUrl = url.toString();
+  }
+
   console.log(`[PROXY] ${req.method} ${veezUrl}`);
   console.log('[PROXY] Body received:', req.body);
   console.log('[PROXY] Files received:', req.files ? req.files.length : 0);
-  
+
   try {
     let body = null;
     let headers = {
@@ -97,26 +106,25 @@ app.all('/api/*', async (req, res) => {
 
     if (req.method === 'POST') {
       const contentType = req.headers['content-type'] || '';
-      
+
       if (contentType.includes('multipart/form-data') && req.body && Object.keys(req.body).length > 0) {
         console.log('[PROXY] Processing multipart/form-data as JSON');
-        
-        // Convertir les données multipart en JSON
+
         body = JSON.stringify(req.body);
         headers['Content-Type'] = 'application/json';
         headers['Content-Length'] = Buffer.byteLength(body);
-        
+
         console.log('[PROXY] Converted multipart to JSON:', body);
-        
+
       } else if (req.body && Object.keys(req.body).length > 0) {
         console.log('[PROXY] Processing regular JSON body');
-        
+
         body = JSON.stringify(req.body);
         headers['Content-Type'] = 'application/json';
         headers['Content-Length'] = Buffer.byteLength(body);
-        
+
         console.log('[PROXY] Sending JSON body:', body);
-        
+
       } else {
         console.log('[PROXY] POST without valid body');
         console.log('[PROXY] Content-Type was:', contentType);
@@ -132,13 +140,12 @@ app.all('/api/*', async (req, res) => {
     });
 
     console.log(`[PROXY] Veez response status: ${response.status}`);
-    
+
     const data = await response.text();
     console.log(`[PROXY] Veez response: ${data.substring(0, 300)}...`);
-    
-    // Headers CORS sur la réponse
+
     res.header('Access-Control-Allow-Origin', '*');
-    
+
     try {
       const jsonData = JSON.parse(data);
       res.status(response.status).json(jsonData);
@@ -149,7 +156,7 @@ app.all('/api/*', async (req, res) => {
   } catch (error) {
     console.error('[PROXY] Error:', error);
     res.header('Access-Control-Allow-Origin', '*');
-    res.status(500).json({ 
+    res.status(500).json({
       error: error.message,
       url: veezUrl,
       method: req.method
