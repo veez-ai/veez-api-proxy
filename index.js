@@ -113,7 +113,7 @@ app.get('/api/:endpoint(*)', async (req, res) => {
   }
 });
 
-// ✅ POST générique avec FIX URL corrigé
+// ✅ POST générique avec FIX TEXTURE[0][KEY]
 app.post('/api/:endpoint(*)', upload.any(), async (req, res) => {
   const endpoint = req.params.endpoint;
   const isMultipart = req.headers['content-type']?.includes('multipart/form-data');
@@ -134,14 +134,23 @@ app.post('/api/:endpoint(*)', upload.any(), async (req, res) => {
   if (isMultipart) {
     const form = new FormData();
     
-    // ✅ Debug détaillé
     console.log('📥 req.body received:', req.body);
     console.log('📎 req.files received:', req.files);
     
-    // ✅ FIX : Gestion sécurisée des champs de formulaire
+    // ✅ FIX : Traitement spécialisé des champs de formulaire
     Object.keys(req.body).forEach(key => {
       const value = req.body[key];
-      if (value !== undefined && value !== null && !Array.isArray(value)) {
+      
+      if (key === 'texture' && Array.isArray(value)) {
+        // ✅ TRAITEMENT SPÉCIAL pour texture array
+        value.forEach((textureData, index) => {
+          if (textureData && textureData.key) {
+            console.log(`📝 Adding texture key: texture[${index}][key] = ${textureData.key}`);
+            form.append(`texture[${index}][key]`, textureData.key);
+          }
+        });
+      } else if (!Array.isArray(value) && value !== undefined && value !== null) {
+        // ✅ Champs normaux
         console.log(`📝 Adding field: ${key} = ${value}`);
         form.append(key, String(value));
       } else {
