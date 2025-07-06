@@ -113,13 +113,13 @@ app.get('/api/:endpoint(*)', async (req, res) => {
   }
 });
 
-// ✅ POST générique avec gestion du slash final
+// ✅ POST générique avec gestion du slash final - CORRECTION DU DOUBLE SLASH
 app.post('/api/:endpoint(*)', upload.any(), async (req, res) => {
   const endpoint = req.params.endpoint;
   const isMultipart = req.headers['content-type']?.includes('multipart/form-data');
 
-  // ✅ Construire l'URL correcte (POST endpoints ont généralement un slash)
-  const veezUrl = `${VEEZ_API_URL}/${endpoint}/`;
+  // ✅ FIX : Éviter le double slash
+  const veezUrl = `${VEEZ_API_URL}/${endpoint}/`.replace('//', '/');
   console.log(`📡 POST ${endpoint} -> ${veezUrl}`);
 
   let body;
@@ -127,8 +127,21 @@ app.post('/api/:endpoint(*)', upload.any(), async (req, res) => {
 
   if (isMultipart) {
     const form = new FormData();
-    for (const key in req.body) form.append(key, req.body[key]);
-    for (const file of req.files) {
+    
+    // ✅ FIX : Gestion sécurisée des champs de formulaire
+    for (const key in req.body) {
+      const value = req.body[key];
+      // Éviter d'ajouter des arrays directement à FormData
+      if (Array.isArray(value)) {
+        console.warn(`⚠️ Skipping array field: ${key}`);
+        continue;
+      }
+      form.append(key, value);
+    }
+    
+    // ✅ FIX : Gestion sécurisée des fichiers
+    for (const file of req.files || []) {
+      console.log(`📎 Adding file: ${file.fieldname} -> ${file.originalname}`);
       form.append(file.fieldname, file.buffer, file.originalname);
     }
 
