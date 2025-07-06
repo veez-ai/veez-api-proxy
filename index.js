@@ -113,13 +113,19 @@ app.get('/api/:endpoint(*)', async (req, res) => {
   }
 });
 
-// ✅ POST générique avec gestion du slash final - CORRECTION DU DOUBLE SLASH
+// ✅ POST générique avec FIX URL corrigé
 app.post('/api/:endpoint(*)', upload.any(), async (req, res) => {
   const endpoint = req.params.endpoint;
   const isMultipart = req.headers['content-type']?.includes('multipart/form-data');
 
-  // ✅ FIX : Éviter le double slash
-  const veezUrl = `${VEEZ_API_URL}/${endpoint}/`.replace('//', '/');
+  // ✅ FIX URL : Éviter de casser https:// et gérer le double slash proprement
+  let veezUrl = `${VEEZ_API_URL}/${endpoint}`;
+  if (!veezUrl.endsWith('/')) {
+    veezUrl += '/';
+  }
+  // Nettoyer seulement les doubles slashes dans le path, pas dans https://
+  veezUrl = veezUrl.replace(/([^:]\/)\/+/g, '$1');
+  
   console.log(`📡 POST ${endpoint} -> ${veezUrl}`);
 
   let body;
@@ -128,21 +134,30 @@ app.post('/api/:endpoint(*)', upload.any(), async (req, res) => {
   if (isMultipart) {
     const form = new FormData();
     
+    // ✅ Debug détaillé
+    console.log('📥 req.body received:', req.body);
+    console.log('📎 req.files received:', req.files);
+    
     // ✅ FIX : Gestion sécurisée des champs de formulaire
-    for (const key in req.body) {
+    Object.keys(req.body).forEach(key => {
       const value = req.body[key];
-      // Éviter d'ajouter des arrays directement à FormData
-      if (Array.isArray(value)) {
-        console.warn(`⚠️ Skipping array field: ${key}`);
-        continue;
+      if (value !== undefined && value !== null && !Array.isArray(value)) {
+        console.log(`📝 Adding field: ${key} = ${value}`);
+        form.append(key, String(value));
+      } else {
+        console.warn(`⚠️ Skipping problematic field: ${key} =`, Array.isArray(value) ? '[Array]' : value);
       }
-      form.append(key, value);
-    }
+    });
     
     // ✅ FIX : Gestion sécurisée des fichiers
-    for (const file of req.files || []) {
-      console.log(`📎 Adding file: ${file.fieldname} -> ${file.originalname}`);
-      form.append(file.fieldname, file.buffer, file.originalname);
+    if (req.files && Array.isArray(req.files)) {
+      req.files.forEach(file => {
+        console.log(`📎 Adding file: ${file.fieldname} -> ${file.originalname} (${file.size} bytes)`);
+        form.append(file.fieldname, file.buffer, {
+          filename: file.originalname,
+          contentType: file.mimetype
+        });
+      });
     }
 
     body = form;
