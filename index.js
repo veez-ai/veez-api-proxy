@@ -82,24 +82,24 @@ app.get('/api/:endpoint(*)', async (req, res) => {
       try {
         const data = await safeJsonParse(response);
         
-        if (data === null && response.status === 500) {
-          // ✅ PRESERVATION du 500 quand Veez.ai retourne une réponse vide
-          console.warn('⚠️ Veez.ai API returned 500 with empty response - product likely processing');
-          return res.status(500).json({ 
-            error: 'Product processing in progress',
-            message: 'Veez.ai is generating packshots, please wait',
-            endpoint: endpoint,
-            url: veezUrl,
-            status: 500
-          });
-        } else if (data === null) {
-          // 404 seulement pour les vraies ressources non trouvées
-          return res.status(404).json({ 
-            error: 'Resource not found or empty response',
-            endpoint: endpoint,
-            url: veezUrl 
-          });
-        }
+if (data === null && response.status === 500) {
+  // Retourner 200 avec statut spécial pour que l'edge function comprenne
+  console.warn('⚠️ Veez.ai API returned 500 - product packshots generating');
+  return res.status(200).json({ 
+    id: endpoint.split('/').pop(),
+    packshots: {},
+    status: 'generating',
+    message: 'Packshots being generated, please wait',
+    processing: true
+  });
+} else if (data === null) {
+  // 404 pour les vraies ressources non trouvées
+  return res.status(404).json({ 
+    error: 'Resource not found or empty response',
+    endpoint: endpoint,
+    url: veezUrl 
+  });
+}
         
         res.status(response.status).json(data);
       } catch (jsonError) {
